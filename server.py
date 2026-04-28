@@ -1,138 +1,144 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, Form, Header
 from fastapi.responses import HTMLResponse
-import os, time, shutil
+import os, time, uuid
 
 app = FastAPI()
 
 clients = {}
 tasks = {}
 results = {}
+sessions = {}
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# -------- LOGIN --------
-users = {"admin": "1234"}
+# ---------------- AUTH ----------------
+USERS = {"admin": "1234"}
 
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
-    if users.get(username) == password:
-        return {"status": "success"}
-    return {"status": "fail"}
+    if USERS.get(username) == password:
+        token = str(uuid.uuid4())
+        sessions[token] = username
+        return {"token": token}
+    return {"error": "invalid"}
 
-# -------- REGISTER --------
+def verify(token):
+    return token in sessions
+
+# ---------------- CLIENT ----------------
 @app.post("/register")
 def register(system_id: str = Form(...)):
     clients[system_id] = time.time()
-    return {"status": "ok"}
+    return {"ok": True}
 
 @app.get("/clients")
 def get_clients():
     now = time.time()
-    return {cid: "online" for cid, t in clients.items() if now - t < 15}
+    return {c: "online" for c,t in clients.items() if now-t < 15}
 
-# -------- FILE CHUNK UPLOAD --------
+# ---------------- CHUNK UPLOAD ----------------
 @app.post("/upload_chunk")
-async def upload_chunk(system_id: str = Form(...), filename: str = Form(...), chunk_id: int = Form(...), file: UploadFile = File(...)):
+async def upload_chunk(system_id: str = Form(...), filename: str = Form(...), chunk_id: int = Form(...), file: UploadFile = File(...), token: str = Header(...)):
+    if not verify(token):
+        return {"error": "unauthorized"}
+
     folder = f"{UPLOAD_DIR}/{system_id}_{filename}"
     os.makedirs(folder, exist_ok=True)
 
     with open(f"{folder}/{chunk_id}.part", "wb") as f:
         f.write(await file.read())
 
-    return {"status": "ok"}
+    return {"ok": True}
 
 @app.post("/complete")
-def complete(system_id: str = Form(...), filename: str = Form(...), total_chunks: int = Form(...)):
+def complete(system_id: str = Form(...), filename: str = Form(...), total_chunks: int = Form(...), token: str = Header(...)):
+    if not verify(token):
+        return {"error": "unauthorized"}
+
     tasks[system_id] = {
         "action": "assemble",
         "filename": filename,
         "total": total_chunks
     }
-    return {"status": "done"}
+    return {"ok": True}
 
-# -------- TASK SYSTEM --------
+# ---------------- TASK ----------------
 @app.post("/task")
-def create_task(system_id: str = Form(...), action: str = Form(...), path: str = Form("")):
+def task(system_id: str = Form(...), action: str = Form(...), path: str = Form(""), token: str = Header(...)):
+    if not verify(token):
+        return {"error": "unauthorized"}
+
     tasks[system_id] = {"action": action, "path": path}
-    return {"status": "task added"}
+    return {"ok": True}
 
 @app.get("/task/{system_id}")
 def get_task(system_id: str):
     return tasks.pop(system_id, {"action": None})
 
 @app.post("/result")
-def save_result(system_id: str = Form(...), data: str = Form(...)):
+def result(system_id: str = Form(...), data: str = Form(...)):
     results[system_id] = data
-    return {"status": "saved"}
+    return {"ok": True}
 
 @app.get("/result/{system_id}")
 def get_result(system_id: str):
     return results.pop(system_id, {})
 
-# -------- DASHBOARD --------
+# ---------------- DASHBOARD ----------------
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard():
     return """
     <html>
     <body>
-    <h2>Clients</h2>
-    <ul id='list'></ul>
+    <h2>Enterprise Dashboard</h2>
+    <div id="clients"></div>
 
     <script>
     async function load(){
-        let res = await fetch('/clients');
-        let data = await res.json();
-        let ul = document.getElementById("list");
-        ul.innerHTML="";
+        let r = await fetch('/clients');
+        let data = await r.json();
 
-        for (let c in data){
-            let li = document.createElement("li");
-            li.innerText = c;
-
-            let btn = document.createElement("button");
-            btn.innerText = "Send File";
-            btn.onclick = ()=>sendFile(c);
-
-            li.appendChild(btn);
-            ul.appendChild(li);
+        let html = "";
+        for(let c in data){
+            html += `<p>${c} <button onclick="send('${c}')">Send</button></p>`;
         }
+        document.getElementById("clients").innerHTML = html;
     }
 
-    async function sendFile(client){
-        let input = document.createElement('input');
-        input.type='file';
+    async function send(c){
+        let f = document.createElement('input');
+        f.type='file';
 
-        input.onchange = async e=>{
+        f.onchange = async e=>{
             let file = e.target.files[0];
-            let chunkSize = 1024*1024;
-            let total = Math.ceil(file.size/chunkSize);
+            let size = 1024*1024;
+            let total = Math.ceil(file.size/size);
 
             for(let i=0;i<total;i++){
-                let chunk = file.slice(i*chunkSize,(i+1)*chunkSize);
-                let form = new FormData();
+                let chunk = file.slice(i*size,(i+1)*size);
+                let fd = new FormData();
 
-                form.append("system_id",client);
-                form.append("filename",file.name);
-                form.append("chunk_id",i);
-                form.append("file",chunk);
+                fd.append("system_id",c);
+                fd.append("filename",file.name);
+                fd.append("chunk_id",i);
+                fd.append("file",chunk);
 
-                await fetch('/upload_chunk',{method:'POST',body:form});
+                await fetch('/upload_chunk',{method:'POST',body:fd});
             }
 
             await fetch('/complete',{
                 method:'POST',
                 body:new URLSearchParams({
-                    system_id:client,
+                    system_id:c,
                     filename:file.name,
                     total_chunks:total
                 })
             });
 
-            alert("File Sent");
+            alert("Done");
         };
-
-        input.click();
+        f.click();
     }
 
     setInterval(load,3000);
