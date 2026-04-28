@@ -18,3 +18,6 @@ def login(username: str = Form(...), password: str = Form(...)):
     if username == "admin" and password == "1234":
         return {"status": "success"}
     return {"status": "fail"}
+    @app.get("/")
+def home():
+    return {"message": "Server is running"}
