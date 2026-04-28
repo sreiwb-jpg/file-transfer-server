@@ -1,20 +1,41 @@
 from fastapi import FastAPI, Form
+import uvicorn
+import time
 
 app = FastAPI()
 
+# Store clients with last seen time
 clients = {}
 
+# ✅ Home route (fixes "Not Found")
+@app.get("/")
+def home():
+    return {"message": "Server is running"}
+
+# ✅ Client registration (heartbeat)
 @app.post("/register")
 def register(system_id: str = Form(...)):
-    clients[system_id] = "online"
-    return {"status": "ok"}
+    clients[system_id] = time.time()
+    return {"status": "registered"}
 
+# ✅ Get only ONLINE clients (last seen within 10 sec)
 @app.get("/clients")
 def get_clients():
-    return clients
+    current_time = time.time()
+    online_clients = {
+        cid: "online"
+        for cid, t in clients.items()
+        if current_time - t < 10
+    }
+    return online_clients
 
-@app.post("/login")
-def login(username: str = Form(...), password: str = Form(...)):
-    if username == "admin" and password == "1234":
-        return {"status": "success"}
-    return {"status": "fail"}
+# ✅ Optional: check specific client
+@app.get("/client/{system_id}")
+def check_client(system_id: str):
+    if system_id in clients:
+        return {"status": "online"}
+    return {"status": "offline"}
+
+# Render start
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=10000)
