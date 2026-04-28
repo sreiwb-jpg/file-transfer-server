@@ -29,11 +29,10 @@ def login(username: str = Form(...), password: str = Form(...)):
 def verify(token):
     return token in sessions
 
-# -------- CLIENT REGISTER --------
+# -------- CLIENT --------
 @app.post("/register")
 def register(system_id: str = Form(...)):
     clients[system_id] = time.time()
-    print("Client Registered:", system_id)
     return {"ok": True}
 
 @app.get("/clients")
@@ -103,6 +102,7 @@ async def upload_chunk(system_id: str = Form(...),
 def complete(system_id: str = Form(...),
              filename: str = Form(...),
              total_chunks: int = Form(...),
+             dest: str = Form(""),
              token: str = Header(...)):
 
     if not verify(token):
@@ -111,7 +111,8 @@ def complete(system_id: str = Form(...),
     tasks[system_id] = {
         "action": "assemble",
         "filename": filename,
-        "total": total_chunks
+        "total": total_chunks,
+        "dest": dest
     }
     return {"ok": True}
 
@@ -119,6 +120,7 @@ def complete(system_id: str = Form(...),
 @app.post("/upload_from_client")
 async def upload_from_client(system_id: str = Form(...),
                              file: UploadFile = File(...)):
+
     path = os.path.join(DOWNLOAD_DIR, file.filename)
 
     with open(path, "wb") as f:
